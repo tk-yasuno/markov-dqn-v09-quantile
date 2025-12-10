@@ -1,0 +1,134 @@
+# Markov Fleet QR-DQN Configuration (v0.9 - QR-DQN Distributional RL)
+# 100-bridge maintenance with unified Markov transition matrices
+# Uses QR-DQN Distributional RL (Dabney et al., AAAI 2018)
+# Uses Noisy Networks for Exploration (ICLR 2018) - no ε-greedy needed
+
+# ===== Fleet Configuration =====
+fleet:
+  n_urban: 40              # Number of urban bridges (higher importance)
+  n_rural: 160             # Number of rural bridges (standard importance)
+  total_bridges: 200       # Total fleet size
+  
+  # Importance weights (for reward calculation)
+  urban_importance: 1.5    # Urban bridges have 1.5x health reward
+  rural_importance: 1.0    # Rural bridges have standard weight
+
+# ===== MDP Parameters =====
+mdp:
+  gamma: 0.95              # Discount factor for future rewards
+  horizon_years: 30        # Episode length (planning horizon)
+  cost_lambda: 0.0003      # Cost penalty scaling (per USD thousand) - reduced to prevent over-optimization
+  
+  # State definitions (municipality-level)
+  states:
+    Good: 0                # High health state
+    Fair: 1                # Medium health state
+    Poor: 2                # Low health state
+  
+  # Markov transition matrices (P[a][s][s'])
+  # Single unified matrix applied to ALL 100 bridges
+  # Represents municipality-level average transition behavior
+  transitions:
+    None:                  # Action 0: Do nothing
+      Good: [0.99, 0.01, 0.00]
+      Fair: [0.00, 0.98, 0.02]
+      Poor: [0.00, 0.00, 1.00]
+    Work31:                # Action 1: Major rehabilitation
+      Good: [0.87, 0.05, 0.08]
+      Fair: [0.02, 0.97, 0.01]
+      Poor: [0.21, 0.10, 0.68]
+    Work33:                # Action 2: Rehabilitation
+      Good: [0.99, 0.01, 0.00]
+      Fair: [0.00, 0.98, 0.02]
+      Poor: [0.00, 0.00, 1.00]
+    Work34:                # Action 3: Deck work
+      Good: [0.87, 0.13, 0.00]
+      Fair: [0.03, 0.97, 0.00]
+      Poor: [0.00, 0.00, 1.00]
+    Work35:                # Action 4: Deck replacement
+      Good: [0.95, 0.05, 0.00]
+      Fair: [0.02, 0.97, 0.01]
+      Poor: [0.06, 0.20, 0.74]
+    Work38:                # Action 5: Widening
+      Good: [0.90, 0.08, 0.02]
+      Fair: [0.02, 0.97, 0.01]
+      Poor: [0.00, 0.17, 0.83]
+  
+  # Health transition rewards R[from_state][to_state]
+  health_rewards:
+    Good: [3, -1, -3]      # from Good to Good/Fair/Poor
+    Fair: [2,  0, -2]      # from Fair to Good/Fair/Poor
+    Poor: [5,  2, -1]      # from Poor to Good/Fair/Poor
+
+# ===== Training Parameters =====
+training:
+  num_episodes: 1000       # Total training episodes (adjust for testing)
+  n_envs: 4                # Number of parallel environments (vectorization)
+  learning_rate: 0.0015    # Adam optimizer learning rate
+  
+  # Noisy Networks for Exploration (v0.7)
+  # No ε-greedy needed - exploration built into network via NoisyLinear layers
+  # Noise is reset at the start of each episode for fresh exploration
+  noisy_sigma_init: 0.5    # Initial noise scale for NoisyLinear layers
+  
+  # Experience replay (Prioritized N-step)
+  buffer_capacity: 10000   # Replay buffer size
+  batch_size: 128          # Minibatch size for optimization (increased for GPU efficiency)
+  n_steps: 3               # N-step returns
+  per_alpha: 0.6           # Prioritization exponent
+  per_beta_start: 0.4      # Importance sampling weight
+  per_beta_increment: 0.001  # Beta increment per sample
+  
+  # Target network sync
+  target_sync_steps: 500   # Update target network every N steps
+  
+  # Random seed
+  seed: 42
+  
+  # Device
+  device: "cuda"           # "cpu" or "cuda" (auto-fallback to cpu if cuda unavailable)
+  
+  # Mixed precision training
+  use_amp: true            # Use Automatic Mixed Precision (AMP) for GPU
+
+# ===== Network Architecture =====
+network:
+  n_bridges: 100           # Total number of bridges
+  n_actions: 6             # Actions per bridge
+  
+  # QR-DQN Distributional DQN architecture with Noisy Networks (v0.9)
+  shared_layers: [512, 256]        # Shared feature extractor (standard Linear)
+  value_layers: [128, 200]         # Value stream (NoisyLinear) - outputs quantiles
+  advantage_layers: [128, 120000]  # Advantage stream (NoisyLinear, 100*6*200)
+  
+  # QR-DQN Quantile Parameters (Dabney et al., AAAI 2018)
+  n_quantiles: 200         # Number of quantiles (default: 200, more flexible than C51)
+  kappa: 1.0               # Huber loss threshold for quantile regression
+  # Quantile midpoints: τ_i = (i + 0.5) / N for i = 0, 1, ..., N-1
+  # More quantiles = better distribution approximation (no need for v_min/v_max!)
+  
+  # Noisy Networks
+  # Value and Advantage streams use NoisyLinear for automatic exploration
+  # Paper: Fortunato et al., "Noisy Networks for Exploration" (ICLR 2018)
+
+# ===== Action Costs (USD thousands) =====
+# From NBI historical data (municipality-level average)
+action_costs:
+  None: 0.0
+  Work31: 2279.69          # Major rehabilitation
+  Work33: 1018.62          # Rehabilitation
+  Work34: 766.76           # Deck work
+  Work35: 1005.71          # Deck replacement
+  Work38: 3126.26          # Widening
+
+# ===== Output Settings =====
+output:
+  model_dir: "outputs_markov/models"
+  plot_dir: "outputs_markov/plots"
+  log_dir: "outputs_markov/logs"
+  save_frequency: 100      # Save model every N episodes
+  
+# ===== Validation Parameters =====
+validation:
+  monte_carlo_runs: 100    # Simulations per initial state
+  plot_window: 100         # Smoothing window for training curve
