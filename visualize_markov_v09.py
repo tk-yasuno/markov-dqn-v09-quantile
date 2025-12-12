@@ -254,12 +254,22 @@ def visualize_c51_distribution(checkpoint_path: str, state_sample: np.ndarray = 
 def main():
     parser = argparse.ArgumentParser(description="Visualize Markov Fleet QR-DQN v0.9 Results")
     parser.add_argument('checkpoint', type=str, help='Path to checkpoint file')
-    parser.add_argument('--save-dir', type=str, default='outputs_markov_v09/plots',
-                       help='Directory to save plots')
+    parser.add_argument('--save-dir', type=str, default=None,
+                       help='Directory to save plots (default: auto-detect from checkpoint path)')
     parser.add_argument('--plot-dist', action='store_true',
                        help='Also plot QR-DQN quantile distributions')
     
     args = parser.parse_args()
+    
+    # Auto-detect save directory from checkpoint path if not specified
+    if args.save_dir is None:
+        checkpoint_path = Path(args.checkpoint)
+        if checkpoint_path.parent.name == 'models':
+            # Checkpoint is in output_dir/models/, use output_dir/plots/
+            args.save_dir = str(checkpoint_path.parent.parent / 'plots')
+        else:
+            # Default fallback
+            args.save_dir = 'outputs_markov_v09/plots'
     
     print("\n" + "="*70)
     print("MARKOV FLEET QR-DQN v0.9 VISUALIZATION")
